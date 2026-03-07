@@ -76,6 +76,7 @@ Add to your `README.md` to tell Claude how to work with you:
 
 ## Need Help?
 
+- **Advanced config** - See [help.md](help.md) for customization options
 - **Re-run setup anytime** - Safe, won't overwrite anything
 - **Edit files directly** - Just text files
 - **Uninstall**: Run `@uninstall` from the repo directory
