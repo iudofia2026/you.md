@@ -230,7 +230,9 @@ your-name.md/
 ├── today.md              # READ FIRST - current life context
 ├── SUMMARY.md            # Overview & recent updates
 ├── README.md             # Your preferences, coaching style
-├── help.md               # This file - advanced configuration
+├── .docs/                # Configuration & setup guides
+│   ├── help.md           # This file - advanced configuration
+│   └── search-setup.md   # Meilisearch integration guide
 ├── .claude/skills/       # Setup and template skills
 │   ├── setup.md          # Run this first
 │   ├── uninstall.md      # Remove your setup
@@ -378,6 +380,8 @@ Add a **Writing Style** section to your README.md to control how Claude writes f
 
 ## Search (Optional)
 
+> **AI Agent Setup**: If you want to add search, tell Claude: "Set up Meilisearch for my personal context following [.docs/search-setup.md](.docs/search-setup.md)" - it can do the entire setup for you.
+
 If you use a search tool like Meilisearch, you can configure your skill to search your context:
 
 ### When to Search
@@ -390,6 +394,16 @@ If you use a search tool like Meilisearch, you can configure your skill to searc
 
 - Content already in today.md, SUMMARY.md, README.md (already loaded)
 - File navigation (use directory structure instead)
+
+### Agent Setup
+
+Claude can set up Meilisearch for you automatically:
+1. Tell it: "Set up Meilisearch for my personal context"
+2. It will create the directory structure, docker-compose.yml, and indexer script
+3. It will guide you through starting the service
+4. It will update your skill with search integration
+
+See [search-setup.md](search-setup.md) for full details.
 
 ---
 

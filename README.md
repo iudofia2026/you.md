@@ -4,7 +4,7 @@ A template for creating a personal knowledge repository that **Claude Code** can
 
 ## Version
 
-**v0.0.2**
+**v0.0.2.2**
 
 ## What This Does
 
@@ -76,11 +76,12 @@ Add to your `README.md` to tell Claude how to work with you:
 
 ## Need Help?
 
-- **Advanced config** - See [help.md](help.md) for customization options
+- **Advanced config** - See [.docs/help.md](.docs/help.md) for customization options
+- **Search setup** - See [.docs/search-setup.md](.docs/search-setup.md) for Meilisearch integration
 - **Re-run setup anytime** - Safe, won't overwrite anything
 - **Edit files directly** - Just text files
 - **Uninstall**: Run `@uninstall` from the repo directory
 
 ---
 
-Based on the `isiah.md` repository structure - a production personal context system in daily use.
+Based on a production personal context system in daily use.

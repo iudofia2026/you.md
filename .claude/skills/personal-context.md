@@ -29,23 +29,26 @@ Load the **minimum context needed** to provide personalized help, then direct to
 
 ```bash
 # Detect OS and sync
-ISIAH_MD="[REPO_PATH]"
-[ ! -d "$ISIAH_MD" ] && ISIAH_MD="[REPO_PATH]"
-cd "$ISIAH_MD" && git pull origin main --quiet
+REPO="[REPO_PATH]"
+cd "$REPO" && git pull origin main --quiet
 
 # Get current date info
 CURRENT_DATE=$(date "+%Y-%m-%d")
 CURRENT_MONTH=$(date "+%B %Y")
 CURRENT_MONTH_NUM=$(date "+%m")
 CURRENT_MONTH_LOWER=$(date "+%B" | tr '[:upper:]' '[:lower:]')
-ARCHIVE_DIR="$ISIAH_MD/archive/$(date +%Y)/$(date +%m)-$(date +%B | tr '[:upper:]' '[:lower:]')"
+ARCHIVE_DIR="$REPO/archive/$(date +%Y)/$(date +%m)-$(date +%B | tr '[:upper:]' '[:lower:]')"
 mkdir -p "$ARCHIVE_DIR"
 
 # Update Last Updated header in today.md
-sed -i '' "s/\*\*Last Updated\*\*: .*/\*\*Last Updated\*\*: $CURRENT_MONTH/" "$ISIAH_MD/today.md"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  sed -i '' "s/\*\*Last Updated\*\*: .*/\*\*Last Updated\*\*: $CURRENT_MONTH/" "$REPO/today.md"
+else
+  sed -i "s/\*\*Last Updated\*\*: .*/\*\*Last Updated\*\*: $CURRENT_MONTH/" "$REPO/today.md"
+fi
 
 # Find and archive past completed entries (before today)
-grep -n "Completed.*2026" "$ISIAH_MD/today.md" 2>/dev/null | while read -r line; do
+grep -n "Completed.*2026" "$REPO/today.md" 2>/dev/null | while read -r line; do
   LINE_NUM=$(echo "$line" | cut -d: -f1)
   COMPLETED_CONTENT=$(echo "$line" | cut -d: -f2-)
 
@@ -77,10 +80,14 @@ EOF
 done
 
 # Remove all completed entries (they're now archived)
-sed -i '' '/Completed.*2026/d' "$ISIAH_MD/today.md" 2>/dev/null || true
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  sed -i '' '/Completed.*2026/d' "$REPO/today.md" 2>/dev/null || true
+else
+  sed -i '/Completed.*2026/d' "$REPO/today.md" 2>/dev/null || true
+fi
 
 # Check if future/ has items for current month
-FUTURE_MONTH_DIR="$ISIAH_MD/future/$(date +%Y)/${CURRENT_MONTH_NUM}-${CURRENT_MONTH_LOWER}"
+FUTURE_MONTH_DIR="$REPO/future/$(date +%Y)/${CURRENT_MONTH_NUM}-${CURRENT_MONTH_LOWER}"
 if [ -d "$FUTURE_MONTH_DIR" ] && [ -f "$FUTURE_MONTH_DIR/items.md" ]; then
   echo "[AUTO] Found future items for $CURRENT_MONTH in $FUTURE_MONTH_DIR"
   echo "[TODO] Migrate items from $FUTURE_MONTH_DIR/items.md to today.md"
@@ -100,9 +107,9 @@ echo "[AUTO] Context synced and refreshed"
       "question": "How should I load your context?",
       "header": "Load Mode",
       "options": [
-        { "label": "Quiet mode", "description": "Load core files (today.md, SUMMARY.md, README.md) silently, wait for your request" },
-        { "label": "Work on to-do items", "description": "Load context and show your immediate priorities as a checklist from today.md" },
-        { "label": "Question mode", "description": "Ask about task type and context needs, then load targeted files" }
+        { "label": "Quiet", "description": "Load core files (today.md, SUMMARY.md, README.md) silently, wait for your request" },
+        { "label": "To-do", "description": "Load context and show your immediate priorities as a checklist from today.md" },
+        { "label": "Question", "description": "Ask about task type and context needs, then load targeted files" }
       ],
       "multiSelect": false
     }
@@ -110,104 +117,96 @@ echo "[AUTO] Context synced and refreshed"
 }
 ```
 
-### Step 2: If Quiet Mode
+### Step 2: Load Based on Mode
 
-Read core files in parallel (use detected path from Step 0):
-```bash
-$ISIAH_MD/today.md          # Current life context (read FIRST)
-$ISIAH_MD/SUMMARY.md        # Overview & recent updates
-$ISIAH_MD/README.md         # Coaching style, tech stack, structure
-```
+| Mode | Files to Read | Presentation |
+|------|---------------|--------------|
+| Quiet | today.md, SUMMARY.md, README.md (parallel) | Summarize, wait for request |
+| Question | Use Task→File mapping below | Ask follow-up with AskUserQuestion |
+| To-do | today.md, parse tasks | Present tasks with AskUserQuestion |
 
-Then summarize:
-```
-[OK] Loaded personal context
-  Current: [from today.md]
-  Ready
-```
-
-### Step 2.5: If "Work on to-do items" Mode
-
-After loading core files (same as Quiet Mode), present the immediate priorities from today.md as a checklist using AskUserQuestion.
-
-Parse the "This Week" section and "PRISM Frontend Tasks" (if exists) from today.md to build the checklist dynamically.
-
-After selection, summarize:
-```
-[OK] Selected: [items user selected]
-Ready to work. What's first?
-```
-
-### Step 3: If Question Mode
-
-Use **AskUserQuestion** to understand task type:
-
+**For To-do mode:**
+1. Parse today.md tasks
+2. Present with AskUserQuestion (not text list):
 ```json
 {
-  "questions": [
-    {
-      "question": "What type of task are you working on?",
-      "header": "Task Type",
-      "options": [
-        { "label": "Writing/Communication", "description": "Emails, messages, documents, personal writing" },
-        { "label": "Professional/Career", "description": "Resume, applications, networking, job search" },
-        { "label": "Relationship/Social", "description": "Communication with specific person, social context" },
-        { "label": "Academic/Thesis", "description": "School work, research, thesis" }
-      ],
-      "multiSelect": false
-    },
-    {
-      "question": "What's most important for me to know for this task?",
-      "header": "Priority Context",
-      "options": [
-        { "label": "Current situation", "description": "What's happening right now (today.md)" },
-        { "label": "Goals & values", "description": "What matters most, long-term direction" },
-        { "label": "Specific person", "description": "Context about someone you're working with" }
-      ],
-      "multiSelect": true
-    }
-  ]
+  "questions": [{
+    "question": "What do you want to tackle?",
+    "header": "Your Tasks",
+    "options": [
+      {"label": "Task name", "description": "Brief context"},
+      ...
+    ],
+    "multiSelect": false
+  }]
 }
 ```
+3. On selection, load relevant files and begin work
 
-### Step 4: Conditionally Load Based on Task Type
+### Step 3: Confirm
 
-**For writing/communication tasks:**
-- `personal/values.md` - Core principles
-- `personal/traits.md` - Personality traits
-- `writing/README.md` - Writing style reference
-
-**For professional/career tasks:**
-- `professional/experience.md` - Work history
-- `professional/skills.md` - Capabilities
-- `professional/goals.md` - Career objectives
-- `professional/contacts-to-ask.md` - Networking targets
-
-**For relationship/communication tasks:**
-- Ask which person, then read their profile:
-- `relationships/friends/[name].md` - Specific friend context
-- `relationships/mentors/[name].md` - Mentor context
-- `relationships/connections/[name].md` - Professional connections
-
-**For academic tasks:**
-- `academic/academic-achievements.md` - Research, publications
-
-**For development work:**
-- See README.md for "Preferred Tech Stack" section
-
-**For planning/strategy tasks:**
-- `personal/annual-goals/[YEAR].md` - Current year goals
-- `personal/values.md` - Core principles
-- `professional/goals.md` - Career objectives
-
-### Step 5: Confirm Context Loaded
-
-After reading, summarize:
 ```
-[OK] Loaded personal context
-  Task: [selected]
-  Current: [from today.md]
+✓ Loaded [YOUR_NAME] context
+  Current: [from today.md Active Projects/This Month]
   Read [X] files
+```
+
+## Key Context (CUSTOMIZE IN YOUR README)
+
+**Coaching Style**: [Customize in your README - e.g., "Ruthless, high standards" or "Supportive and encouraging"]
+
+**Current Situation**: ALWAYS read fresh from today.md sections:
+- Active Projects table
+- This Month's Focus
+- Calendar > Upcoming
+- Today tasks
+
+**Writing Style**: [Customize in your README - e.g., "Concise but thorough, personal yet professional, evidence-backed, active voice"]
+
+## Task → File Mapping
+
+| Task Type | Read These Files |
+|-----------|------------------|
+| Writing/Communication | values.md, traits.md, writing/README.md |
+| Professional/Career | experience.md, skills.md, goals.md, contacts-to-ask.md |
+| Relationship/Social | friends/[name].md or mentors/[name].md or connections/[name].md |
+| Academic/Thesis | academic-achievements.md, thesis-senior-project.md |
+| Development | README.md (tech stack), project-specific docs |
+| Planning/Strategy | annual-goals/[YEAR].md, values.md, goals.md |
+
+## Task Archiving
+
+When user says "Archive: [task]" or "Mark done":
+
+```markdown
+# [Task Name]
+**Date Archived**: YYYY-MM-DD
+**Status**: COMPLETED
+
+## Context
+[Brief description]
+
+## Action Taken
+[What happened - full transcripts/messages/links]
+
+## Notes
+[Follow-up needed, lessons learned]
+```
+
+1. Create file in `archive/YYYY/MM-monthname/[kebab-task-name].md`
+2. Remove from today.md
+3. `git add -A && git commit -m "archive: [task] - YYYY-MM-DD" && git push origin main`
+
+## Appendices
+
+**External Projects** (customize in your README with your actual projects):
+- Project 1: `[path/to/project]`
+- Project 2: `[path/to/project]`
+- Project 3: `[url or description]`
+
+**After ANY changes to your repo**:
+```bash
+cd "$REPO" && git add -A && git commit -m "update: [brief]" && git push origin main --quiet
 ```
 
 ## today.md Structure
@@ -221,23 +220,15 @@ The `today.md` file is your current life context. Maintain this structure:
 
 ---
 
-## Calendar
+## Tasks
+
+### Today (MMM D)
+
+### Tomorrow (MMM D)
+- [ ] Task
 
 ### Upcoming
-
-| Date | Event | Priority | Status |
-|------|-------|----------|--------|
-| Mar 2 | Event name | High | Scheduled |
-
-### This Week (Mar 2-8)
-
-- [ ] Task name
-- [ ] Another task
-
-### Project Tasks (Optional)
-
-- [ ] Project specific task
-- [ ] Another project task
+- [ ] Task
 
 ---
 
@@ -246,6 +237,16 @@ The `today.md` file is your current life context. Maintain this structure:
 | Project | Type | Status | Next Action |
 |---------|------|--------|-------------|
 | Project Name | Type | Status | Next action |
+
+---
+
+## Calendar
+
+### Upcoming
+
+| Date | Event | Priority | Status |
+|------|-------|----------|--------|
+| Mar 2 | Event name | High | Scheduled |
 
 ---
 
@@ -278,15 +279,15 @@ The `today.md` file is your current life context. Maintain this structure:
    - Valid Priority: High, Medium, Low
    - Valid Status: Scheduled, Planned, In Progress, Completed, Cancelled
 
-2. **This Week checklist** - Add line: `- [ ] Task name`
+2. **Tasks checklist** - Add line: `- [ ] Task name`
 
 3. **Active Projects table** - Add row with format: `| Project | Type | Status | Next Action |`
 
 **When REMOVING items:**
 
 - Use exact string matching
-- For checklist: `sed -i '' '/- \[ \] Exact task text/d' "$ISIAH_MD/today.md"`
-- For tables: `sed -i '' '/| Exact Project Name |/d' "$ISIAH_MD/today.md"`
+- For checklist: `sed -i '' '/- \[ \] Exact task text/d' "$REPO/today.md"`
+- For tables: `sed -i '' '/| Exact Project Name |/d' "$REPO/today.md"`
 
 **When UPDATING items:**
 
@@ -299,18 +300,19 @@ The `today.md` file is your current life context. Maintain this structure:
 your-name.md/
 ├── today.md              # READ FIRST - current life context
 ├── SUMMARY.md            # Overview & recent updates
-├── README.md             # Coaching style, tech stack, structure
+├── README.md             # Coaching style, structure, customization
+├── .docs/                # Configuration & setup guides
+│   ├── help.md           # Advanced configuration guide
+│   └── search-setup.md   # Search integration guide
 ├── archive/              # Past events by year/month
 │   └── 2026/
 │       ├── 01-january/
 │       ├── 02-february/
 │       └── 03-march/
-│           └── event-name.md
 ├── future/               # Future items beyond ~4 weeks
 │   └── 2026/
 │       ├── 04-april/
-│       ├── 05-may/
-│       └── README.md
+│       └── 05-may/
 ├── personal/             # Values, traits, goals, fitness
 ├── professional/         # Experience, skills, projects, goals
 ├── relationships/        # Family, friends, mentors, connections
@@ -440,7 +442,7 @@ Ask about documenting when:
 After making changes:
 
 ```bash
-cd "$ISIAH_MD"
+cd "$REPO"
 git add -A
 git commit -m "update: [brief description] - [YYYY-MM-DD]" --quiet
 git push origin main --quiet
