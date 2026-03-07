@@ -429,6 +429,102 @@ Then select "Remove skill and repo"
 
 ## Troubleshooting
 
+### Common Errors
+
+#### Error: "@setup doesn't do anything"
+
+**Cause**: You're running `@setup` from outside your repository directory.
+
+**Fix**: Always `cd` into your repo first:
+```bash
+cd ~/github/your-name.md
+@setup
+```
+
+The setup skill uses `$(pwd)` to detect your repository path, so it must be run from within the repo.
+
+---
+
+#### Error: "Skill not found" after running @setup
+
+**Cause**: Skill was created but Claude Code hasn't reloaded skills.
+
+**Fix**: Restart Claude Code or wait a moment for skills to reload. You can verify the skill exists:
+```bash
+ls ~/.claude/skills@your-name/
+```
+
+---
+
+#### Error: "Permission denied" when skill tries to git pull
+
+**Cause**: Repository doesn't have git configured or has authentication issues.
+
+**Fix**: Make sure your git is configured and you have access to the repo:
+```bash
+cd ~/github/your-name.md
+git remote -v  # Should show your fork
+git status     # Should work without errors
+```
+
+---
+
+#### Error: "today.md stale - needs rollover" every time
+
+**Cause**: Your today.md has the wrong date format or no "Today" section.
+
+**Fix**: Make sure today.md has a section with today's date:
+```markdown
+### Today (Mar 7)
+```
+
+The format must match: `### Today (MMM D)` — month abbreviation, space, day without leading zero.
+
+---
+
+#### Error: Skill shows wrong repository path
+
+**Cause**: You ran `@setup` from a different directory.
+
+**Fix**: Re-run `@setup` from the correct directory:
+```bash
+cd ~/github/your-name.md
+@setup
+```
+
+When it asks if you're re-running, say yes. The skill will be updated with the correct path.
+
+---
+
+#### Error: Git commits fail with "nothing to commit"
+
+**Cause**: Skill tries to commit even when no changes were made (this is normal and harmless).
+
+**Fix**: No action needed — the `|| true` in the skill handles this gracefully.
+
+---
+
+#### Error: Archive files aren't being created
+
+**Cause**: Completed entries in today.md don't match the expected format.
+
+**Fix**: Make sure completed entries use this exact format:
+```markdown
+Completed March 7, 2026: Task name - outcome
+```
+
+The date must include year, and format must be: `Completed [Month] [Day], [Year]: [Task] - [Outcome]`
+
+---
+
+#### Error: "fnox: command not found"
+
+**Cause**: You're trying to use Meilisearch with fnox secret management, but fnox isn't installed.
+
+**Fix**: Either install fnox, or hardcode your MEILI_MASTER_KEY in docker-compose.yml (see search-setup.md).
+
+---
+
 ### Can I re-run setup?
 
 **Yes!** Re-running `@setup` is completely safe:
@@ -441,16 +537,17 @@ Then select "Remove skill and repo"
 
 Check the skill path points to your repo:
 ```bash
-cat ~/.claude/skills/your-name/skill.md | grep REPO_PATH
+cat ~/.claude/skills/your-name/description.md | grep REPO_PATH
 ```
 
 Should show your actual repository path.
 
 ### Something else wrong?
 
-1. Make sure you're in the repository directory
+1. Make sure you're in the repository directory before running `@setup`
 2. Check the repo is cloned to `~/github/your-name.md`
-3. Try re-running `@setup` - won't overwrite your data
+3. Try re-running `@setup` — won't overwrite your data
+4. Check Claude Code is updated to the latest version
 
 ---
 
