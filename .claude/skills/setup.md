@@ -82,12 +82,15 @@ mkdir -p "$SKILL_DIR"
 cp .claude/skills/personal-context.md "$SKILL_DIR/description.md"
 
 # Replace placeholders
+# Convert skill-name to readable name (e.g., "john-smith" → "John Smith")
+READABLE_NAME=$(echo "$SKILL_NAME" | sed -E 's/-/ /g; s/\b(.)/\u\1/g')
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  sed -i '' "s/\[YOUR_NAME\]/$USER_NAME/g" "$SKILL_DIR/description.md"
+  sed -i '' "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_DIR/description.md"
   sed -i '' "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_DIR/description.md"
   sed -i '' "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_DIR/description.md"
 else
-  sed -i "s/\[YOUR_NAME\]/$USER_NAME/g" "$SKILL_DIR/description.md"
+  sed -i "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_DIR/description.md"
   sed -i "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_DIR/description.md"
   sed -i "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_DIR/description.md"
 fi
