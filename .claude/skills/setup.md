@@ -10,23 +10,112 @@ priority: 100
 # Personal Context Setup
 
 This skill sets up your personal context repository. It will:
-1. Ask for your skill name (what you'll type to invoke your context, e.g., /@john)
+1. Ask for your skill name (what you'll type to invoke your context, e.g., /john or /jane-smith)
 2. Ask exploratory questions to populate your repository
 3. Create your skill at `~/.claude/skills/your-name/`
 4. Create initial files based on your answers
 
 **Re-running setup is safe.** Existing files are never overwritten - setup only creates new files.
 
-## Step 0: Detect if Re-running
+## Step 0: Doctor Check (Read-Only)
+
+Run environment diagnostics before making any changes. No writes, no commits.
 
 ```bash
-# Check if setup has been run before
-SKILL_DIR="$HOME/.claude/skills@$SKILL_NAME"
-if [[ -d "$SKILL_DIR" ]]; then
-  RERUN=true
-  echo "[INFO] Re-running setup - will add new files without overwriting existing ones"
+DOCTOR_PASS=0
+DOCTOR_WARN=0
+DOCTOR_FAIL=0
+
+echo "=== you.md Setup Doctor ==="
+echo ""
+
+# 1. Repo path detection
+REPO_PATH="$(pwd)"
+REPO_NAME="$(basename "$REPO_PATH")"
+if [[ -f "$REPO_PATH/today.md" ]] && [[ -f "$REPO_PATH/README.md" ]]; then
+  echo "  [PASS] Repo path detected: $REPO_PATH"
+  DOCTOR_PASS=$((DOCTOR_PASS + 1))
 else
-  RERUN=false
+  echo "  [FAIL] Not a valid you.md repo — today.md or README.md missing"
+  echo "         Run setup from inside your cloned you.md repo directory"
+  DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
+fi
+
+# 2. Git state
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ -z "$(git branch --show-current 2>/dev/null)" ]]; then
+    echo "  [WARN] Git: detached HEAD state — sync may be unsafe"
+    DOCTOR_WARN=$((DOCTOR_WARN + 1))
+  elif ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    echo "  [WARN] Git: uncommitted changes present — will skip auto-pull"
+    DOCTOR_WARN=$((DOCTOR_WARN + 1))
+  else
+    git fetch origin main --quiet 2>/dev/null
+    LOCAL=$(git rev-parse HEAD 2>/dev/null)
+    REMOTE=$(git rev-parse origin/main 2>/dev/null)
+    if [[ "$LOCAL" == "$REMOTE" ]]; then
+      echo "  [PASS] Git: up to date with remote"
+      DOCTOR_PASS=$((DOCTOR_PASS + 1))
+    elif git merge-base --is-ancestor "$LOCAL" origin/main 2>/dev/null; then
+      echo "  [PASS] Git: behind remote — will pull during setup"
+      DOCTOR_PASS=$((DOCTOR_PASS + 1))
+    elif git merge-base --is-ancestor origin/main "$LOCAL" 2>/dev/null; then
+      echo "  [WARN] Git: local is ahead of remote — will skip pull"
+      DOCTOR_WARN=$((DOCTOR_WARN + 1))
+    else
+      echo "  [WARN] Git: diverged from remote — manual resolution may be needed"
+      DOCTOR_WARN=$((DOCTOR_WARN + 1))
+    fi
+  fi
+else
+  echo "  [WARN] Git: not a git repository — sync features will be disabled"
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+fi
+
+# 3. Skill install path — detect legacy vs normalized
+LEGACY_COUNT=$(find "$HOME/.claude" -name "description.md" -path "*/skills@*" 2>/dev/null | wc -l | tr -d ' ')
+NORMALIZED_COUNT=$(find "$HOME/.claude/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
+
+if [[ "$LEGACY_COUNT" -gt 0 ]]; then
+  echo "  [WARN] Skill path: $LEGACY_COUNT legacy install(s) found (skills@name/description.md)"
+  echo "         Setup will migrate these to the normalized path (skills/name/SKILL.md)"
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+elif [[ "$NORMALIZED_COUNT" -gt 0 ]]; then
+  echo "  [PASS] Skill path: normalized installs detected (skills/name/SKILL.md)"
+  DOCTOR_PASS=$((DOCTOR_PASS + 1))
+else
+  echo "  [PASS] Skill path: no existing installs — fresh setup"
+  DOCTOR_PASS=$((DOCTOR_PASS + 1))
+fi
+
+# 4. Invocation convention check
+if grep -r "/@" "$HOME/.claude/skills" --include="*.md" --include="*.txt" -l 2>/dev/null | grep -q .; then
+  echo "  [WARN] Invocation: some skill files still use /@name convention (should be /name)"
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+else
+  echo "  [PASS] Invocation: /name convention looks correct"
+  DOCTOR_PASS=$((DOCTOR_PASS + 1))
+fi
+
+# 5. Optional search readiness
+if curl -sf http://localhost:7700/health >/dev/null 2>&1; then
+  echo "  [PASS] Search: Meilisearch running at localhost:7700 (optional feature available)"
+  DOCTOR_PASS=$((DOCTOR_PASS + 1))
+else
+  echo "  [INFO] Search: Meilisearch not running — search features will be skipped (optional)"
+fi
+
+echo ""
+echo "=== Doctor Summary: $DOCTOR_PASS PASS | $DOCTOR_WARN WARN | $DOCTOR_FAIL FAIL ==="
+echo ""
+
+if [[ "$DOCTOR_FAIL" -gt 0 ]]; then
+  echo "  [STOP] Fix FAIL items above before continuing setup."
+  exit 1
+elif [[ "$DOCTOR_WARN" -gt 0 ]]; then
+  echo "  [OK] Warnings detected — setup will proceed safely, see notes above."
+else
+  echo "  [OK] All checks passed — safe to proceed."
 fi
 ```
 
@@ -36,7 +125,7 @@ fi
 {
   "questions": [
     {
-      "question": "What name would you like for your skill? This is the /@name you'll use to invoke your context. (e.g., type 'john' for /@john, 'jane-smith' for /@jane-smith)",
+      "question": "What name would you like for your skill? This is the /name you'll use to invoke your context. (e.g., type 'john' for /john, 'jane-smith' for /jane-smith)",
       "header": "Skill Name",
       "multiSelect": false
     }
@@ -45,6 +134,27 @@ fi
 ```
 
 Store as `SKILL_NAME` (lowercase, with hyphens for spaces).
+
+## Step 1.5: Rerun Detection (now that SKILL_NAME is known)
+
+```bash
+# Check normalized path first, then legacy path
+SKILL_FILE_NEW="$HOME/.claude/skills/$SKILL_NAME/SKILL.md"
+SKILL_FILE_LEGACY="$HOME/.claude/skills@$SKILL_NAME/description.md"
+
+if [[ -f "$SKILL_FILE_NEW" ]]; then
+  RERUN=true
+  echo "[INFO] Re-running setup — skill already installed at $SKILL_FILE_NEW"
+  echo "[INFO] Existing files will NOT be overwritten — only new files will be created"
+elif [[ -f "$SKILL_FILE_LEGACY" ]]; then
+  RERUN=true
+  echo "[INFO] Re-running setup — legacy skill found at $SKILL_FILE_LEGACY"
+  echo "[INFO] Will migrate to normalized path during Step 2"
+else
+  RERUN=false
+  echo "[INFO] Fresh install — creating new skill for /$SKILL_NAME"
+fi
+```
 
 ## Privacy Check
 
@@ -77,28 +187,48 @@ REPO_NAME="$(basename "$REPO_PATH")"
 ## Step 2: Create the Skill
 
 ```bash
-SKILL_DIR="$HOME/.claude/skills@$SKILL_NAME"
+# Normalized install path (current convention)
+SKILL_DIR="$HOME/.claude/skills/$SKILL_NAME"
+SKILL_FILE="$SKILL_DIR/SKILL.md"
+
+# Legacy path (old convention — skills@name/description.md)
+LEGACY_DIR="$HOME/.claude/skills@$SKILL_NAME"
+LEGACY_FILE="$LEGACY_DIR/description.md"
+
+# Detect and migrate legacy install if present
+if [[ -f "$LEGACY_FILE" ]] && [[ ! -f "$SKILL_FILE" ]]; then
+  echo "[MIGRATE] Legacy skill detected at $LEGACY_FILE"
+  mkdir -p "$SKILL_DIR"
+  cp "$LEGACY_FILE" "$SKILL_FILE"
+  echo "[MIGRATE] Copied to normalized path: $SKILL_FILE"
+  echo "[MIGRATE] Legacy file preserved at $LEGACY_FILE (delete manually once confirmed working)"
+elif [[ -f "$SKILL_FILE" ]]; then
+  echo "[INFO] Skill already installed at $SKILL_FILE — re-running setup"
+fi
+
+# Install or update skill
 mkdir -p "$SKILL_DIR"
-cp .claude/skills/personal-context.md "$SKILL_DIR/description.md"
+cp .claude/skills/personal-context.md "$SKILL_FILE"
 
 # Replace placeholders
 # Convert skill-name to readable name (e.g., "john-smith" → "John Smith")
 READABLE_NAME=$(echo "$SKILL_NAME" | sed -E 's/-/ /g; s/\b(.)/\u\1/g')
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  sed -i '' "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_DIR/description.md"
-  sed -i '' "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_DIR/description.md"
-  sed -i '' "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_DIR/description.md"
+  sed -i '' "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_FILE"
+  sed -i '' "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_FILE"
+  sed -i '' "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_FILE"
 else
-  sed -i "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_DIR/description.md"
-  sed -i "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_DIR/description.md"
-  sed -i "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_DIR/description.md"
+  sed -i "s/\*\*\[YOUR_NAME\]\*\*/$READABLE_NAME/g" "$SKILL_FILE"
+  sed -i "s|\[REPO_PATH\]|$REPO_PATH|g" "$SKILL_FILE"
+  sed -i "s/name: personal-context/name: $SKILL_NAME/g" "$SKILL_FILE"
 fi
 ```
 
 Confirm:
 ```
-[OK] Skill created as /@$SKILL_NAME
+[OK] Skill installed at ~/.claude/skills/$SKILL_NAME/SKILL.md
+[OK] Invoke with: /$SKILL_NAME
 ```
 
 ## Step 3: Exploratory Questions
@@ -314,7 +444,7 @@ Final confirmation:
 [OK] Personal context is up and running!
 
 Your personal context is ready:
-- Skill: /@$SKILL_NAME
+- Skill: /$SKILL_NAME
 - Repository: $REPO_PATH
 - Files created: [count] files based on your answers
 
@@ -325,7 +455,7 @@ Repository path:
 $REPO_PATH
 
 Next steps:
-1. Use /@$SKILL_NAME to load your context in any conversation
+1. Use /$SKILL_NAME to load your context in any conversation
 2. Edit files anytime to add more information
 3. ⚠️ Only push if your repo is PRIVATE: git push origin main
 ```

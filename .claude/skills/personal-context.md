@@ -30,7 +30,44 @@ Load the **minimum context needed** to provide personalized help, then direct to
 ```bash
 # Detect OS and sync
 REPO="[REPO_PATH]"
-cd "$REPO" && git pull origin main --quiet
+cd "$REPO" || { echo "[WARN] Could not cd to repo: $REPO"; }
+
+# State-aware git sync — never blindly pull
+SYNC_STATUS="skipped"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ -z "$(git branch --show-current 2>/dev/null)" ]]; then
+    echo "  ~ repo (detached HEAD, skipping sync)"
+    SYNC_STATUS="skipped-detached"
+  elif ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    echo "  ~ repo (uncommitted changes, skipping sync)"
+    SYNC_STATUS="skipped-dirty"
+  else
+    git fetch origin main --quiet 2>/dev/null
+    LOCAL=$(git rev-parse HEAD 2>/dev/null)
+    REMOTE=$(git rev-parse origin/main 2>/dev/null)
+    if [[ "$LOCAL" == "$REMOTE" ]]; then
+      echo "  • repo (up to date)"
+      SYNC_STATUS="current"
+    elif git merge-base --is-ancestor "$LOCAL" origin/main 2>/dev/null; then
+      if git pull origin main --quiet 2>/dev/null; then
+        echo "  ✓ repo (pulled)"
+        SYNC_STATUS="pulled"
+      else
+        echo "  ✗ repo (pull failed, using existing)"
+        SYNC_STATUS="failed"
+      fi
+    elif git merge-base --is-ancestor origin/main "$LOCAL" 2>/dev/null; then
+      echo "  ↑ repo (local ahead, skipping pull)"
+      SYNC_STATUS="ahead"
+    else
+      echo "  ! repo (diverged, skipping pull — resolve manually)"
+      SYNC_STATUS="diverged"
+    fi
+  fi
+else
+  echo "  ~ repo (not a git repo, skipping sync)"
+  SYNC_STATUS="no-git"
+fi
 
 # Get current date info
 CURRENT_DATE=$(date "+%Y-%m-%d")
@@ -47,19 +84,33 @@ else
   sed -i "s/\*\*Last Updated\*\*: .*/\*\*Last Updated\*\*: $CURRENT_MONTH/" "$REPO/today.md"
 fi
 
-# Find and archive past completed entries (before today)
-grep -n "Completed.*2026" "$REPO/today.md" 2>/dev/null | while read -r line; do
-  LINE_NUM=$(echo "$line" | cut -d: -f1)
-  COMPLETED_CONTENT=$(echo "$line" | cut -d: -f2-)
+# Find and archive past completed entries — dynamic year, no hardcoded values
+CURRENT_YEAR=$(date +%Y)
+COMPLETED_LINES=$(grep -n "Completed.*${CURRENT_YEAR}" "$REPO/today.md" 2>/dev/null)
 
-  # Parse the date from the completed entry
-  COMPLETED_DATE=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*Completed ([A-Za-z]+ [0-9]+, [0-9]+).*/\1/')
+if [[ -n "$COMPLETED_LINES" ]]; then
+  COMPLETED_COUNT=$(echo "$COMPLETED_LINES" | wc -l | tr -d ' ')
+  echo "[AUTO] Found $COMPLETED_COUNT completed entry/entries to archive"
 
-  # Create archive entry for this completed item
-  TASK_NAME=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*Completed [A-Za-z]+ [0-9]+, [0-9]+: (.+) - .*/\1/' | cut -d'-' -f1 | sed 's/:$//')
-  OUTCOME=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*- (.+)$/\1/')
+  # Preview before mutating — use AskUserQuestion here
+  # Show the lines that will be archived, ask for confirmation
+  # (Agent should use AskUserQuestion tool with options: "Archive & remove" / "Skip archiving")
+  # Only proceed with deletion if user confirms
 
-  cat > "$ARCHIVE_DIR/${TASK_NAME// /-}-$(date +%Y%m%d).md" << EOF
+  echo "$COMPLETED_LINES" | while IFS= read -r line; do
+    LINE_NUM=$(echo "$line" | cut -d: -f1)
+    COMPLETED_CONTENT=$(echo "$line" | cut -d: -f2-)
+
+    # Parse date and task name — skip if parsing fails (empty content guard)
+    COMPLETED_DATE=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*Completed ([A-Za-z]+ [0-9]+, [0-9]+).*/\1/')
+    TASK_NAME=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*Completed [A-Za-z]+ [0-9]+, [0-9]+: (.+) - .*/\1/' | cut -d'-' -f1 | sed 's/:$//' | xargs)
+    OUTCOME=$(echo "$COMPLETED_CONTENT" | sed -E 's/.*- (.+)$/\1/' | xargs)
+
+    # Skip if task name is empty (malformed line)
+    [[ -z "$TASK_NAME" ]] && continue
+
+    ARCHIVE_FILE="$ARCHIVE_DIR/${TASK_NAME// /-}-$(date +%Y%m%d).md"
+    cat > "$ARCHIVE_FILE" << ARCHEOF
 # ${TASK_NAME}
 
 **Date Completed**: ${COMPLETED_DATE}
@@ -76,14 +127,20 @@ ${OUTCOME}
 ## Notes
 
 Auto-archived on $(date "+%B %-d, %Y")
-EOF
-done
+ARCHEOF
+    echo "[AUTO] Archived: $TASK_NAME → $ARCHIVE_FILE"
+  done
 
-# Remove all completed entries (they're now archived)
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  sed -i '' '/Completed.*2026/d' "$REPO/today.md" 2>/dev/null || true
+  # IMPORTANT: Agent must show user a preview and confirm with AskUserQuestion before running this deletion
+  # Only delete after user confirms the archive above succeeded
+  # Use AskUserQuestion: "Archive completed — remove $COMPLETED_COUNT entries from today.md?" Yes/Skip
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    sed -i '' "/Completed.*${CURRENT_YEAR}/d" "$REPO/today.md" 2>/dev/null || true
+  else
+    sed -i "/Completed.*${CURRENT_YEAR}/d" "$REPO/today.md" 2>/dev/null || true
+  fi
 else
-  sed -i '/Completed.*2026/d' "$REPO/today.md" 2>/dev/null || true
+  echo "[AUTO] No completed entries to archive"
 fi
 
 # Check if future/ has items for current month
@@ -150,6 +207,34 @@ echo "[AUTO] Context synced and refreshed"
   Current: [from today.md Active Projects/This Month]
   Read [X] files
 ```
+
+## Search (Optional)
+
+**Default**: Use file reads (Read tool + Glob). Search is an optional enhancement — never a requirement.
+
+**When to search**: Finding a specific person, topic, or document across many files is faster with search.
+
+**Health check first** — always verify before attempting:
+
+```bash
+SEARCH_AVAILABLE=false
+if curl -sf http://localhost:7700/health >/dev/null 2>&1; then
+  SEARCH_AVAILABLE=true
+fi
+```
+
+**If `SEARCH_AVAILABLE=true`**: Use search for broad queries (finding people, topics, keywords across repo):
+
+```bash
+curl -s -X POST "http://localhost:7700/indexes/personal_documents/search" \
+  -H "Authorization: Bearer $(your-key-manager get YOUR_SEARCH_KEY 2>/dev/null)" \
+  -H "Content-Type: application/json" \
+  -d '{"q": "query", "limit": 5}' 2>/dev/null | jq '.hits[] | {path, title}' 2>/dev/null
+```
+
+**If `SEARCH_AVAILABLE=false`**: Fall back to file reads silently — no errors, no warnings to the user.
+
+> **Setup**: See `.docs/search-setup.md` in your repo for optional search configuration instructions.
 
 ## Key Context (CUSTOMIZE IN YOUR README)
 
